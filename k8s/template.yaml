@@ -1,0 +1,53 @@
+apiVersion: templating.flanksource.com/v1
+kind: Template
+metadata:
+  name: vnc-mqtt-bridge-operator
+spec:
+  source:
+    apiVersion: utilities.strudelline.net/v1alpha1
+    kind: VNCMQTTBridge
+  resources:
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: "{{.metadata.name}}"
+      namespace: "{{.metadata.namespace}}"
+      annotations: 
+        "reloader.stakater.com/auto": "true"
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: "vnc-mqtt-bridge"
+          vnc-mqtt-bridge: "{{.metadata.name}}"
+      strategy:
+        type: RollingUpdate
+      template:
+        metadata:
+          labels:
+            app: "vnc-mqtt-bridge"
+            vnc-mqtt-bridge: "{{.metadata.name}}"
+        spec:
+          terminationGracePeriodSeconds: 0
+          containers:
+            - image: "{{ .spec.image | default \"ghcr.io/jamesandariese/vnc-mqtt-bridge:main\" }}"
+              imagePullPolicy: Always
+              name: vncmqtt
+              env:
+              - {"name": "LOGLEVEL",      "value": "debug"}
+              - {"name": "DEVICE_ID",     "value": "{{.spec.deviceId | default .metadata.name}}"}
+              - {"name": "DEVICE_NAME",   "value": "{{.spec.deviceName}}"}
+              - {"name": "INTERVAL",      "value": "{{.spec.interval | default 5}}"}
+              - {"name": "VNC_HOST",      "valueFrom": {"secretKeyRef": {"name": "{{.spec.vncSecretName}}",  "key": "host"}}}
+              - {"name": "VNC_PASSWORD",  "valueFrom": {"secretKeyRef": {"name": "{{.spec.vncSecretName}}",  "key": "password"}}}
+              - {"name": "MQTT_TOPIC",    "value": "{{.metadata.namespace}}/{{.metadata.name}}"}
+              - {"name": "MQTT_HOST",     "valueFrom": {"secretKeyRef": {"name": "{{.spec.mqttSecretName}}", "key": "host"}}}
+              - {"name": "MQTT_USER",     "valueFrom": {"secretKeyRef": {"name": "{{.spec.mqttSecretName}}", "key": "username"}}}
+              - {"name": "MQTT_PASSWORD", "valueFrom": {"secretKeyRef": {"name": "{{.spec.mqttSecretName}}", "key": "password"}}}
+              livenessProbe:
+                exec:
+                  command: ["/health.sh"]
+                initialDelaySeconds: 300
+                periodSeconds: 30
+                failureThreshold: 10
+          restartPolicy: Always

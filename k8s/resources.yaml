@@ -1,0 +1,144 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "proxy-protocol-shim-proxy"
+  namespace: "proxy-protocol-shim"
+  labels:
+    proxy-protocol-shim: proxy
+    app: proxy-protocol-shim
+data:
+  HTTPS_UPSTREAM: "HTTPS-UPSTREAM-NOT-CONFIGURED"
+  HTTP_UPSTREAM: "HTTP-UPSTREAM-NOT-CONFIGURED"
+  haproxy.cfg: |
+    global
+    	log stdout format raw local0
+    	stats timeout 30s
+    	user haproxy
+    	group haproxy
+    
+    defaults
+    	log	global
+    	mode	tcp
+    	option	tcplog
+    	option	dontlognull
+        balance source
+        timeout connect 5000
+        timeout client  50000
+        timeout server  50000
+    
+    frontend http80
+        bind *:80
+        mode http
+        http-request redirect scheme https
+    
+    frontend https443
+        bind *:443
+        default_backend httpsnodes
+    
+    backend httpnodes
+        server s1 $HTTP_UPSTREAM check send-proxy
+    
+    backend httpsnodes
+        server s1 $HTTPS_UPSTREAM check send-proxy
+    
+    frontend stats
+        mode http
+        option httplog
+        bind *:8404
+        stats enable
+        stats uri /
+        stats refresh 10s
+        stats admin if LOCALHOST
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "haproxy-server"
+  namespace: "proxy-protocol-shim"
+  annotations:
+    reloader.stakater.com/auto: "true"
+  labels:
+    proxy-protocol-shim: proxy
+    app: "proxy-protocol-shim"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      proxy-protocol-shim: proxy
+      app: "proxy-protocol-shim"
+  strategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        proxy-protocol-shim: proxy
+        app: "proxy-protocol-shim"
+    spec:
+      containers:
+       -  image: haproxy:latest
+          name: haproxy
+          env:
+          - name: HTTP_UPSTREAM
+            valueFrom:
+              configMapKeyRef:
+                name: "{{.metadata.name}}-haproxy-server"
+                key: HTTP_UPSTREAM
+          - name: HTTPS_UPSTREAM
+            valueFrom:
+              configMapKeyRef:
+                name: "{{.metadata.name}}-haproxy-server"
+                key: HTTPS_UPSTREAM
+          volumeMounts:
+            - mountPath: /usr/local/etc/haproxy/haproxy.cfg
+              name: config
+              subPath: haproxy.cfg
+          ports:
+          - containerPort: 80
+            name: http
+            protocol: TCP
+          - containerPort: 443
+            name: https
+            protocol: TCP
+          - containerPort: 8404
+            name: stats
+            protocol: TCP
+      restartPolicy: Always
+      volumes:
+        - name: config
+          configMap:
+            name: "{{.metadata.name}}-haproxy-server"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: "proxy-protocol-shim-proxy"
+  namespace: "proxy-protocol-shim"
+  labels:
+    proxy-protocol-shim: proxy
+    app: "proxy-protocol-shim"
+spec:
+  allocateLoadBalancerNodePorts: true
+  externalTrafficPolicy: Local
+  internalTrafficPolicy: Local
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: http-80
+    port: 80
+    protocol: TCP
+    targetPort: http
+  - name: https-443
+    port: 443
+    protocol: TCP
+    targetPort: https
+  - name: https-8404
+    port: 8404
+    protocol: TCP
+    targetPort: stats
+  selector:
+    proxy-protocol-shim: proxy
+    app: "proxy-protocol-shim"
+  type: LoadBalancer
+
