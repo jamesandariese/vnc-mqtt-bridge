@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import time
+import traceback
 
 import imageio
 
@@ -81,33 +82,70 @@ def blackwhite(imgf):
     whitecount = byt.count(b'\xff')
     return blackcount,whitecount,count
 
-mqtt = paho.Client()
-mqtt.username_pw_set(MQTT_USER, MQTT_PASSWORD)
-mqtt.connect(MQTT_HOST)
-mqtt.loop_start()
-
-mqtt.publish(f"homeassistant/camera/{DEVICE_ID}/config", json.dumps({
-  "name": NAME,
-  "topic": MQTT_TOPIC + "/image",
-  "unique_id": DEVICE_ID+"-T",
-  "device_class": "camera",
-  "device": {
-    "identifiers": DEVICE_ID,
-    "manufacturer": "VNC-MQTT",
-    "model": "v0.1",
-  },
-}), retain=True)
+mqtt_clients = []
+def mqtt():
+    if len(mqtt_clients) > 0:
+        c = mqtt_clients[0]
+        try:
+            c.publish(f"homeassistant/camera/{DEVICE_ID}/config", json.dumps({
+              "name": NAME,
+              "topic": MQTT_TOPIC + "/image",
+              "unique_id": DEVICE_ID+"-T",
+              "device_class": "camera",
+              "device": {
+                "identifiers": DEVICE_ID,
+                "manufacturer": "VNC-MQTT",
+                "model": "v0.1",
+              },
+            }), retain=True)
+            return mqtt_clients[0]
+        except:
+            try:
+                mqtt_clients[0].loop_stop()
+            except:
+                pass
+            mqtt_clients.clear()
+            return mqtt()
+    try:
+        logger.info("Connecting to MQTT")
+        c = paho.Client()
+        c.username_pw_set(MQTT_USER, MQTT_PASSWORD)
+        c.connect(MQTT_HOST)
+        c.loop_start()
+        mqtt_clients.append(c)
+    except Exception as e:
+        logger.error(traceback.format_exc())
+        time.sleep(1)
+    return mqtt()
 
 t = None
+
+vnc_clients = []
+def vnc():
+    if len(vnc_clients) > 0:
+        try:
+            vnc_clients[0].refreshScreen()
+            # this is the only path out.  an existing vnc client
+            # that successfully refreshes its screen
+            return vnc_clients[0]
+        except:
+            vnc_clients.clear()
+    try:
+        logger.info("Connecting to VNC")
+        vnc_clients.append(api.connect(VNC_HOST, VNC_PASSWORD))
+    except Exception as e:
+        logger.error(traceback.format_exc())
+        time.sleep(1)
+    return vnc()
 
 while True:
     if t is None:
         t = time.time()
-    with api.connect(VNC_HOST, VNC_PASSWORD) as vnc:
+    try:
         logger.debug("refreshing for capture")
-        vnc.refreshScreen()
+        vnc().refreshScreen()
         logger.debug("capturing")
-        vnc.captureScreen('capture.png')
+        vnc().captureScreen('capture.png')
         logger.debug("publishing to mqtt")
         with open('capture.png', 'rb') as f:
             capture = f.read()
@@ -121,7 +159,9 @@ while True:
         with open('capture.time', 'wb') as f:
             pass  # touch :D
 
-        p = mqtt.publish(topic=MQTT_TOPIC + "/image", payload=capture)
+        p = mqtt().publish(topic=MQTT_TOPIC + "/image", payload=capture)
+    except Exception as e:
+        logger.error(traceback.format_exc())
     time_left = INTERVAL - (time.time() - t)
     if time_left > 0:
         logger.debug(f"sleeping for {time_left}s")
@@ -130,5 +170,5 @@ while True:
         logger.warning(f"interval missed ({0-time_left}s overdue)")
     t = None
 
-mqtt.loop_end()
+mqtt().loop_end()
 reactor.stop()
