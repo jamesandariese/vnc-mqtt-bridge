@@ -3,7 +3,7 @@
 DT=$(date +%s)
 CT=$(stat -c %Z capture.time)
 
-if [ $(( DT - CT )) -gt $(( 5 * INTERVAL )) ];then
+if [ $(( DT - CT )) -gt $(( ${HEALTH_MULTIPLIER-60} * INTERVAL )) ];then
     echo bad
     false
 else

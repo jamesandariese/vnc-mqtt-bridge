@@ -150,11 +150,11 @@ while True:
         with open('capture.png', 'rb') as f:
             capture = f.read()
         (black,white,total) = blackwhite('capture.png')
-        if black > (total / 2): # if it's more than half black, it's a failure
-            logger.warning(f"screen is more than half black.  considering as failure.")
+        if black > (total * .95): # if it's more than 95% black, it's a failure
+            logger.warning(f"screen is more than 95% black.  considering as failure.")
             continue
-        if white > (total / 2): # if it's more than half white, it's a failure
-            logger.warning(f"screen is more than half white.  considering as failure.")
+        if white > (total * .95): # if it's more than 95% white, it's a failure
+            logger.warning(f"screen is more than 95% white.  considering as failure.")
             continue
         with open('capture.time', 'wb') as f:
             pass  # touch :D
